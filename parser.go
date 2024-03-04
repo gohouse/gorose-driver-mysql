@@ -82,7 +82,7 @@ func (b Builder) toSqlInsert(c *gorose.Context, data any, ignoreCase string, onD
 	return
 }
 
-func (b Builder) toSqlUpdate(c *gorose.Context, data any) (sql4prepare string, values []any, err error) {
+func (b Builder) toSqlUpdateReal(c *gorose.Context, data any) (sql4prepare string, values []any, err error) {
 	rfv := reflect.Indirect(reflect.ValueOf(data))
 	var updates []string
 	switch rfv.Kind() {

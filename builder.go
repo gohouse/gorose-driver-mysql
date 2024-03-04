@@ -49,27 +49,6 @@ func (b Builder) ToSql(c *gorose.Context) (sql4prepare string, binds []any, err 
 	return
 }
 
-func (b Builder) ToSqlIncDec(c *gorose.Context, symbol string, data map[string]any) (sql4prepare string, values []any, err error) {
-	prepare, anies, err := b.ToSqlTable(c)
-	if err != nil {
-		return sql4prepare, values, err
-	}
-	where, val, err := b.ToSqlWhere(c)
-	if err != nil {
-		return sql4prepare, values, err
-	}
-	values = append(values, anies...)
-	values = append(values, val...)
-
-	var tmp []string
-	for k, v := range data {
-		tmp = append(tmp, fmt.Sprintf("%s=%s%s?", BackQuotes(k), BackQuotes(k), symbol))
-		values = append(values, v)
-	}
-	sql4prepare = fmt.Sprintf("UPDATE %s SET %s %s", prepare, strings.Join(tmp, ","), where)
-	return
-}
-
 func (Builder) ToSqlSelect(c *gorose.Context) (sql4prepare string, binds []any) {
 	var cols []string
 	for _, col := range c.SelectClause.Columns {
@@ -99,8 +78,8 @@ func (b Builder) ToSqlTable(c *gorose.Context) (sql4prepare string, binds []any,
 	return b.buildSqlTable(c.TableClause, c.Prefix)
 }
 
-func (b Builder) buildSqlTable(tab *gorose.TableClause, prefix string) (sql4prepare string, binds []any, err error) {
-	if v, ok := tab.Tables.(gorose.IDriver); ok {
+func (b Builder) buildSqlTable(tab gorose.TableClause, prefix string) (sql4prepare string, binds []any, err error) {
+	if v, ok := tab.Tables.(gorose.IBuilder); ok {
 		return v.ToSql()
 	}
 	rfv := reflect.Indirect(reflect.ValueOf(tab.Tables))
@@ -201,7 +180,7 @@ func (b Builder) ToSqlJoin(c *gorose.Context) (sql4prepare string, binds []any, 
 			}
 			sql4prepare = fmt.Sprintf("%s JOIN %s ON %s %s %s", item.Type, prepare, BackQuotes(item.Column1), item.Operator, BackQuotes(item.Column2))
 		case gorose.TypeJoinSub:
-			sql4prepare, binds, err = item.IDriver.ToSql()
+			sql4prepare, binds, err = item.ToSql()
 			if err != nil {
 				return
 			}
@@ -223,9 +202,9 @@ func (b Builder) ToSqlJoin(c *gorose.Context) (sql4prepare string, binds []any, 
 }
 
 func (b Builder) ToSqlGroupBy(c *gorose.Context) (sql4prepare string) {
-	if len(c.Groups) > 0 {
+	if len(c.GroupClause.Groups) > 0 {
 		var tmp []string
-		for _, col := range c.Groups {
+		for _, col := range c.GroupClause.Groups {
 			if col.IsRaw {
 				tmp = append(tmp, col.Column)
 			} else {
@@ -282,37 +261,55 @@ func (b Builder) ToSqlLimitOffset(c *gorose.Context) (sqlSegment string, binds [
 	return
 }
 
-func (b Builder) ToSqlInsert(c *gorose.Context, obj any, ignoreCase string, onDuplicateKeys []string, mustFields ...string) (sqlSegment string, binds []any, err error) {
+//func (b Builder) ToSqlInsert(c *gorose.Context, obj any, ignoreCase string, onDuplicateKeys []string, mustFields ...string) (sqlSegment string, binds []any, err error) {
+
+// ToSqlInsert insert
+func (b Builder) ToSqlInsert(c *gorose.Context, obj any, args ...gorose.TypeToSqlInsertCase) (sqlSegment string, binds []any, err error) {
+	var arg gorose.TypeToSqlInsertCase
+	if len(args) > 0 {
+		arg = args[0]
+	}
 	var ctx = *c
 	rfv := reflect.Indirect(reflect.ValueOf(obj))
 	switch rfv.Kind() {
 	case reflect.Struct:
 		var datas []map[string]any
-		datas, err = gorose.StructsToInsert(obj, mustFields...)
+		datas, err = gorose.StructsToInsert(obj, arg.MustFields...)
 		if err != nil {
 			return
 		}
-		ctx.Table(obj)
-		return b.toSqlInsert(&ctx, datas, ignoreCase, onDuplicateKeys)
+		ctx.TableClause.Table(obj)
+		return b.toSqlInsert(&ctx, datas, arg.IgnoreCase, arg.OnDuplicateKeys)
 	case reflect.Slice:
 		switch rfv.Type().Elem().Kind() {
 		case reflect.Struct:
-			c.Table(obj)
+			c.TableClause.Table(obj)
 			var datas []map[string]any
-			datas, err = gorose.StructsToInsert(obj, mustFields...)
+			datas, err = gorose.StructsToInsert(obj, arg.MustFields...)
 			if err != nil {
 				return
 			}
-			return b.toSqlInsert(c, datas, ignoreCase, onDuplicateKeys)
+			return b.toSqlInsert(c, datas, arg.IgnoreCase, arg.OnDuplicateKeys)
 		default:
-			return b.toSqlInsert(c, obj, ignoreCase, onDuplicateKeys)
+			return b.toSqlInsert(c, obj, arg.IgnoreCase, arg.OnDuplicateKeys)
 		}
 	default:
-		return b.toSqlInsert(c, obj, ignoreCase, onDuplicateKeys)
+		return b.toSqlInsert(c, obj, arg.IgnoreCase, arg.OnDuplicateKeys)
 	}
 }
 
-func (b Builder) ToSqlUpdate(c *gorose.Context, obj any, mustFields ...string) (sqlSegment string, binds []any, err error) {
+func (b Builder) ToSqlUpdate(c *gorose.Context, arg any) (sqlSegment string, binds []any, err error) {
+	switch v := arg.(type) {
+	case gorose.TypeToSqlUpdateCase:
+		return b.toSqlUpdate(c, v.BindOrData, v.MustFields...)
+	case gorose.TypeToSqlIncDecCase:
+		return b.toSqlIncDec(c, v.Symbol, v.Data)
+	default:
+		return
+	}
+}
+
+func (b Builder) toSqlUpdate(c *gorose.Context, obj any, mustFields ...string) (sqlSegment string, binds []any, err error) {
 	rfv := reflect.Indirect(reflect.ValueOf(obj))
 	switch rfv.Kind() {
 	case reflect.Struct:
@@ -321,14 +318,35 @@ func (b Builder) ToSqlUpdate(c *gorose.Context, obj any, mustFields ...string) (
 			return sqlSegment, binds, err
 		}
 		var ctx = *c
-		ctx.Table(obj)
+		ctx.TableClause.Table(obj)
 		if pk != "" {
-			ctx.Where(pk, pkValue)
+			ctx.WhereClause.Where(pk, pkValue)
 		}
-		return b.toSqlUpdate(&ctx, dataMap)
+		return b.toSqlUpdateReal(&ctx, dataMap)
 	default:
-		return b.toSqlUpdate(c, obj)
+		return b.toSqlUpdateReal(c, obj)
 	}
+}
+
+func (b Builder) toSqlIncDec(c *gorose.Context, symbol string, data map[string]any) (sql4prepare string, values []any, err error) {
+	prepare, anies, err := b.ToSqlTable(c)
+	if err != nil {
+		return sql4prepare, values, err
+	}
+	where, val, err := b.ToSqlWhere(c)
+	if err != nil {
+		return sql4prepare, values, err
+	}
+	values = append(values, anies...)
+	values = append(values, val...)
+
+	var tmp []string
+	for k, v := range data {
+		tmp = append(tmp, fmt.Sprintf("%s=%s%s?", BackQuotes(k), BackQuotes(k), symbol))
+		values = append(values, v)
+	}
+	sql4prepare = fmt.Sprintf("UPDATE %s SET %s %s", prepare, strings.Join(tmp, ","), where)
+	return
 }
 
 func (b Builder) ToSqlDelete(c *gorose.Context, obj any) (sqlSegment string, binds []any, err error) {
@@ -340,10 +358,11 @@ func (b Builder) ToSqlDelete(c *gorose.Context, obj any) (sqlSegment string, bin
 		if err != nil {
 			return sqlSegment, binds, err
 		}
-		ctx.Table(obj).Where(data)
+		ctx.TableClause.Table(obj)
+		ctx.WhereClause.Where(data)
 		return b.toSqlDelete(&ctx)
 	case reflect.Int64, reflect.Int32, reflect.String:
-		ctx.Where("id", obj)
+		ctx.WhereClause.Where("id", obj)
 		return b.toSqlDelete(&ctx)
 	default:
 		err = errors.New("obj must be struct or id value")
