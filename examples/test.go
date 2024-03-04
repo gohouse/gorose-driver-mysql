@@ -19,6 +19,21 @@ type User struct {
 
 var gr = gorose.Open("mysql", "root:123456@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=true")
 
+// var conf = gorose.Config{
+//	Driver:          "mysql",
+//	DSN:             "root:123456@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=true",
+//	Prefix:          "tb_",
+//	Weight:          0,
+//	MaxIdleConns:    0,
+//	MaxOpenConns:    0,
+//	ConnMaxLifetime: 0,
+//	ConnMaxIdleTime: 0,
+//}
+// _ = gorose.ConfigCluster{
+// 		WriteConf: []gorose.Config{conf},
+// 		ReadConf: []gorose.Config{conf},
+// }
+
 func db() *gorose.Database {
 	return gr.NewDatabase()
 }

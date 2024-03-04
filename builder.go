@@ -298,6 +298,27 @@ func (b Builder) ToSqlInsert(c *gorose.Context, obj any, args ...gorose.TypeToSq
 	}
 }
 
+func (b Builder) ToSqlDelete(c *gorose.Context, obj any) (sqlSegment string, binds []any, err error) {
+	var ctx = *c
+	rfv := reflect.Indirect(reflect.ValueOf(obj))
+	switch rfv.Kind() {
+	case reflect.Struct:
+		data, err := gorose.StructToDelete(obj)
+		if err != nil {
+			return sqlSegment, binds, err
+		}
+		ctx.TableClause.Table(obj)
+		ctx.WhereClause.Where(data)
+		return b.toSqlDelete(&ctx)
+	case reflect.Int64, reflect.Int32, reflect.String:
+		ctx.WhereClause.Where("id", obj)
+		return b.toSqlDelete(&ctx)
+	default:
+		err = errors.New("obj must be struct or id value")
+	}
+	return
+}
+
 func (b Builder) ToSqlUpdate(c *gorose.Context, arg any) (sqlSegment string, binds []any, err error) {
 	switch v := arg.(type) {
 	case gorose.TypeToSqlUpdateCase:
@@ -346,26 +367,5 @@ func (b Builder) toSqlIncDec(c *gorose.Context, symbol string, data map[string]a
 		values = append(values, v)
 	}
 	sql4prepare = fmt.Sprintf("UPDATE %s SET %s %s", prepare, strings.Join(tmp, ","), where)
-	return
-}
-
-func (b Builder) ToSqlDelete(c *gorose.Context, obj any) (sqlSegment string, binds []any, err error) {
-	var ctx = *c
-	rfv := reflect.Indirect(reflect.ValueOf(obj))
-	switch rfv.Kind() {
-	case reflect.Struct:
-		data, err := gorose.StructToDelete(obj)
-		if err != nil {
-			return sqlSegment, binds, err
-		}
-		ctx.TableClause.Table(obj)
-		ctx.WhereClause.Where(data)
-		return b.toSqlDelete(&ctx)
-	case reflect.Int64, reflect.Int32, reflect.String:
-		ctx.WhereClause.Where("id", obj)
-		return b.toSqlDelete(&ctx)
-	default:
-		err = errors.New("obj must be struct or id value")
-	}
 	return
 }
